@@ -120,6 +120,7 @@ int main(int argc, char** argv) {
     // Background stars (non-colliding visual layer)
     std::vector<Vec2> stars;
     std::vector<int> starBase;
+    std::vector<float> starDepth; // 0.0 = far, 1.0 = near (for parallax)
 
     auto createAsteroids = [&](std::vector<Asteroid>& out) {
         out.clear();
@@ -181,11 +182,18 @@ int main(int argc, char** argv) {
         std::mt19937 rng(1234567);
         std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
         std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
+        std::uniform_real_distribution<float> rz(0.0f, 1.0f);
         stars.clear();
         starBase.clear();
+        starDepth.clear();
         for (int i = 0; i < STAR_COUNT; ++i) {
+            // world position
             stars.push_back({ rx(rng), ry(rng) });
+            // small variety in apparent size
             starBase.push_back((i % 3) + 1);
+            // depth: bias towards farther stars (square the random)
+            float z = rz(rng);
+            starDepth.push_back(z * z);
         }
     }
 
@@ -342,16 +350,34 @@ int main(int argc, char** argv) {
         SDL_RenderClear(ren);
 
         // Update and draw asteroids
-        // Draw background stars
+        // Draw background stars with simple parallax layers
         if (!stars.empty()) {
             float tt = SDL_GetTicks() * 0.001f;
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            // camera offset (world -> screen) based on ship centered in screen
+            Vec2 cam{ shipPos.x - static_cast<float>(W) / 2.0f, shipPos.y - static_cast<float>(H) / 2.0f };
             for (size_t si = 0; si < stars.size(); ++si) {
-                float flick = 0.6f + 0.4f * std::sin(tt * (0.5f + (si % 7) * 0.06f));
+                float depth = (si < starDepth.size()) ? starDepth[si] : 0.0f; // 0..1, 0 = far
+                float par = 1.0f - depth; // how strongly the star follows the camera
+                float sx = stars[si].x - cam.x * par;
+                float sy = stars[si].y - cam.y * par;
+                sx = wrap(sx, 0.0f, static_cast<float>(W));
+                sy = wrap(sy, 0.0f, static_cast<float>(H));
+
+                // small twinkle tuned by depth (near stars twinkle slightly faster)
+                float flick = 0.6f + 0.4f * std::sin(tt * (0.5f + (si % 7) * 0.06f) + depth * 3.0f);
                 int base = starBase[si % starBase.size()];
-                int alpha = static_cast<int>(50 + 80 * flick * (base / 3.0f));
-                SDL_SetRenderDrawColor(ren, 200, 200, 220, alpha);
-                SDL_RenderDrawPoint(ren, static_cast<int>(stars[si].x), static_cast<int>(stars[si].y));
+                int alpha = static_cast<int>(40 + 120 * flick * (0.4f + 0.6f * depth));
+                Uint8 col = static_cast<Uint8>(200 * (0.6f + 0.4f * depth));
+                SDL_SetRenderDrawColor(ren, col, col, 230, alpha);
+
+                int size = base + ((depth > 0.8f) ? 1 : 0);
+                if (size <= 1) {
+                    SDL_RenderDrawPoint(ren, static_cast<int>(sx), static_cast<int>(sy));
+                } else {
+                    SDL_Rect r{ static_cast<int>(sx) - size/2, static_cast<int>(sy) - size/2, size, size };
+                    SDL_RenderFillRect(ren, &r);
+                }
             }
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
         }
