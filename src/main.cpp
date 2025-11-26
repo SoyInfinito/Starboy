@@ -4,6 +4,7 @@
 #include <chrono>
 #include <random>
 #include <cstring>
+#include <string>
 #include <fstream>
 #if defined(__has_include)
 #  if __has_include(<SDL_ttf.h>)
@@ -256,22 +257,26 @@ int main(int argc, char** argv) {
     const float starTwinklePresetBoost[] = { 0.9f, 1.0f, 3.3f };
     // Settings persistence
     const std::string settingsFilePath = "starboy_settings.txt";
-    auto loadTwinklePreset = [&]() {
+    bool shootingStarsEnabled = true; // persisted setting
+    auto loadSettings = [&]() {
         std::ifstream ifs(settingsFilePath);
         if (!ifs) return;
         int p = -1;
-        ifs >> p;
-        if (ifs && p >= 0 && p < 3) {
-            starTwinklePreset = p;
+        int s = -1;
+        ifs >> p >> s;
+        if (ifs) {
+            if (p >= 0 && p < 3) starTwinklePreset = p;
+            if (s == 0) shootingStarsEnabled = false;
+            else if (s == 1) shootingStarsEnabled = true;
         }
     };
-    auto saveTwinklePreset = [&](int p) {
+    auto saveSettings = [&]() {
         std::ofstream ofs(settingsFilePath, std::ios::trunc);
         if (!ofs) return;
-        ofs << p;
+        ofs << starTwinklePreset << " " << (shootingStarsEnabled ? 1 : 0);
     };
-    // load persisted preset (if any)
-    loadTwinklePreset();
+    // load persisted settings (if any)
+    loadSettings();
 
     auto renderText = [&](SDL_Renderer* r, TTF_Font* f, const char* text, SDL_Color col, int& outW, int& outH)->SDL_Texture* {
         outW = outH = 0;
@@ -348,7 +353,12 @@ int main(int argc, char** argv) {
                 if (ev.key.keysym.sym == SDLK_y) {
                     starTwinklePreset = (starTwinklePreset + 1) % 3;
                     // persist immediately
-                    saveTwinklePreset(starTwinklePreset);
+                    saveSettings();
+                }
+                // toggle shooting stars (O)
+                if (ev.key.keysym.sym == SDLK_o) {
+                    shootingStarsEnabled = !shootingStarsEnabled;
+                    saveSettings();
                 }
                 if (menuOpen) {
                     if (ev.key.keysym.sym == SDLK_UP) {
@@ -441,7 +451,7 @@ int main(int argc, char** argv) {
                 s.life = 0.0f;
                 sparks.push_back(s);
             }
-            if (pr(runtimeRng) < pShoot) {
+            if (shootingStarsEnabled && pr(runtimeRng) < pShoot) {
                 // choose spawn edge and velocity across screen diagonally
                 std::uniform_real_distribution<float> between(0.0f, 1.0f);
                 float side = between(runtimeRng);
