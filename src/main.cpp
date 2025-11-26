@@ -315,7 +315,7 @@ int main(int argc, char** argv) {
         while (SDL_PollEvent(&ev)) {
             if (ev.type == SDL_QUIT) running = false;
 
-            if (ev.type == SDL_MOUSEBUTTONDOWN) {
+                if (ev.type == SDL_MOUSEBUTTONDOWN) {
                 // menu icon area (top-left 40x24)
                 int mx = ev.button.x;
                 int my = ev.button.y;
@@ -325,21 +325,33 @@ int main(int argc, char** argv) {
                 } else if (menuOpen) {
                     // compute menu box geometry to detect clicks on items
                     int menuW = 320;
-                    int menuH = 180;
-                    int bx = (W - menuW) / 2;
-                    int by = (H - menuH) / 2;
                     int padding = 18;
                     int itemH = 40;
+                    int itemCount = inSettings ? static_cast<int>(settingsItemsStatic.size()) : static_cast<int>(menuItems.size());
+                    int menuH = padding * 2 + itemCount * (itemH + 6) - 6;
+                    int bx = (W - menuW) / 2;
+                    int by = (H - menuH) / 2;
                     if (mx >= bx && mx <= bx + menuW && my >= by && my <= by + menuH) {
                         int relativeY = my - (by + padding);
                         if (relativeY >= 0) {
                             int slot = relativeY / (itemH + 6);
-                            if (slot >= 0 && slot < (int)menuItems.size()) {
-                                const char* sel = menuItems[slot];
-                                if (strcmp(sel, "Resume") == 0) { menuOpen = false; }
-                                else if (strcmp(sel, "Settings") == 0) { inSettings = true; settingsSelection = 0; }
-                                else if (strcmp(sel, "Restart") == 0) { restartGame(); menuOpen = false; }
-                                else if (strcmp(sel, "Quit") == 0) { running = false; }
+                            if (!inSettings) {
+                                if (slot >= 0 && slot < (int)menuItems.size()) {
+                                    const char* sel = menuItems[slot];
+                                    if (strcmp(sel, "Resume") == 0) { menuOpen = false; }
+                                    else if (strcmp(sel, "Settings") == 0) { inSettings = true; settingsSelection = 0; }
+                                    else if (strcmp(sel, "Restart") == 0) { restartGame(); menuOpen = false; }
+                                    else if (strcmp(sel, "Quit") == 0) { running = false; }
+                                }
+                            } else {
+                                if (slot >= 0 && slot < (int)settingsItemsStatic.size()) {
+                                    if (slot == 0) {
+                                        shootingStarsEnabled = !shootingStarsEnabled;
+                                        saveSettings();
+                                    } else if (slot == 1) {
+                                        inSettings = false;
+                                    }
+                                }
                             }
                         }
                     }
@@ -727,7 +739,10 @@ int main(int argc, char** argv) {
             SDL_RenderFillRect(ren, &full);
 
             int menuW = 320;
-            int menuH = 180;
+            int padding = 18;
+            int itemH = 40;
+            int itemCount = inSettings ? static_cast<int>(settingsItemsStatic.size()) : static_cast<int>(menuItems.size());
+            int menuH = padding * 2 + itemCount * (itemH + 6) - 6;
             int mx = (W - menuW) / 2;
             int my = (H - menuH) / 2;
             SDL_SetRenderDrawColor(ren, 30, 30, 40, 220);
@@ -735,8 +750,6 @@ int main(int argc, char** argv) {
             SDL_RenderFillRect(ren, &box);
 
             // Draw items
-            int padding = 18;
-            int itemH = 40;
             SDL_Color white{240,240,240,255};
             SDL_Color yellow{255,220,40,255};
             if (!inSettings) {
