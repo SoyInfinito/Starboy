@@ -4,6 +4,7 @@
 #include <chrono>
 #include <random>
 #include <cstring>
+#include <fstream>
 #if defined(__has_include)
 #  if __has_include(<SDL_ttf.h>)
 #    include <SDL_ttf.h>
@@ -232,6 +233,24 @@ int main(int argc, char** argv) {
     int starTwinklePreset = 2; // 0=subtle,1=normal,2=normal+
     const char* starTwinklePresetNames[] = { "Subtle", "Normal", "Normal+" };
     const float starTwinklePresetBoost[] = { 0.9f, 1.0f, 3.3f };
+    // Settings persistence
+    const std::string settingsFilePath = "starboy_settings.txt";
+    auto loadTwinklePreset = [&]() {
+        std::ifstream ifs(settingsFilePath);
+        if (!ifs) return;
+        int p = -1;
+        ifs >> p;
+        if (ifs && p >= 0 && p < 3) {
+            starTwinklePreset = p;
+        }
+    };
+    auto saveTwinklePreset = [&](int p) {
+        std::ofstream ofs(settingsFilePath, std::ios::trunc);
+        if (!ofs) return;
+        ofs << p;
+    };
+    // load persisted preset (if any)
+    loadTwinklePreset();
 
     auto renderText = [&](SDL_Renderer* r, TTF_Font* f, const char* text, SDL_Color col, int& outW, int& outH)->SDL_Texture* {
         outW = outH = 0;
@@ -307,6 +326,8 @@ int main(int argc, char** argv) {
                 // cycle twinkle presets (Y)
                 if (ev.key.keysym.sym == SDLK_y) {
                     starTwinklePreset = (starTwinklePreset + 1) % 3;
+                    // persist immediately
+                    saveTwinklePreset(starTwinklePreset);
                 }
                 if (menuOpen) {
                     if (ev.key.keysym.sym == SDLK_UP) {
