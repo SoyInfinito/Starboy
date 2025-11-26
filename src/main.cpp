@@ -70,6 +70,7 @@ struct Asteroid {
     Vec2 pos;
     std::vector<Vec2> shape; // relative
     float radius; // approximate collision radius
+    Vec2 vel{0.0f, 0.0f};
 };
 
 int main(int argc, char** argv) {
@@ -136,6 +137,9 @@ int main(int argc, char** argv) {
                 if (len > maxr) maxr = len;
             }
             a.radius = maxr;
+            // initial velocity (small drift) - deterministic based on index
+            a.vel.x = (i % 2 == 0) ? 8.0f : -6.0f;
+            a.vel.y = ((i % 3) - 1) * 4.0f;
             out.push_back(std::move(a));
         }
     };
@@ -297,8 +301,15 @@ int main(int argc, char** argv) {
                 splitAsteroid(a, children);
                 // erase the original
                 asts.erase(asts.begin() + i);
-                // insert children (if any)
-                for (auto &c : children) asts.push_back(std::move(c));
+                // if children produced, set small velocities for them
+                for (size_t ci = 0; ci < children.size(); ++ci) {
+                    // velocity roughly perpendicular to offset direction
+                    float vx = (ci == 0) ? -40.0f : 40.0f;
+                    float vy = (ci == 0) ? -24.0f : 24.0f;
+                    children[ci].vel.x = vx;
+                    children[ci].vel.y = vy;
+                    asts.push_back(std::move(children[ci]));
+                }
                 // reset ship
                 shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
                 shipVel = { 0.0f, 0.0f };
@@ -311,9 +322,14 @@ int main(int argc, char** argv) {
         SDL_SetRenderDrawColor(ren, 8, 8, 20, 255);
         SDL_RenderClear(ren);
 
-        // Draw asteroids
+        // Update and draw asteroids
         SDL_SetRenderDrawColor(ren, 180, 180, 160, 255);
-        for (const auto& a : asts) {
+        for (auto &a : asts) {
+            // update position
+            a.pos.x += a.vel.x * dt;
+            a.pos.y += a.vel.y * dt;
+            a.pos.x = wrap(a.pos.x, 0.0f, static_cast<float>(W));
+            a.pos.y = wrap(a.pos.y, 0.0f, static_cast<float>(H));
             std::vector<Vec2> absPts;
             absPts.reserve(a.shape.size());
             for (const auto& p : a.shape) {
