@@ -2,14 +2,14 @@
 
 A tiny SDL2-based prototype.
 
-## Version 0.1.1
+## Version 0.2
 
-What's new in 0.1.1:
-- In-game menu (top-left hamburger or press `ESC`) with options: **Resume**, **Restart**, **Quit**.
-- Menu supports keyboard navigation (Up/Down, Enter) and mouse clicks. If `SDL_ttf` is available the menu shows rendered text; otherwise a visual fallback is used.
-- Aligned ship nose with thrust direction (press `Up` to thrust toward the ship's nose).
-- Thrust visuals: a two-layer flickering flame while thrusting.
-- Removed temporary debug logs from runtime output.
+What's new in 0.2:
+- Deterministic multi-layer starfield with parallax depth and per-star twinkle (presets and debug boost).
+- Occasional visual sparks and rare shooting stars with trails; toggleable and persisted to `starboy_settings.txt`.
+- Settings submenu in the in-game menu to control persistent visuals.
+- Improved menu sizing and keyboard/mouse navigation (fallback rendering if `SDL_ttf` is not available).
+- Ship visuals: aligned nose, two-layer thrust flame, and basic ship-asteroid collision handling.
 
 Controls
 - Left / Right: rotate ship
@@ -31,7 +31,7 @@ If `sdl2-ttf` is not available the menu still works with a visual fallback.
 
 Initial status
 
-**Version:** 0.1
+**Version:** 0.2
 
 **Notes:** First functional prototype — the project builds with CMake/vcpkg, links SDL2 correctly, and the `starboy.exe` executable runs a minimal playable prototype (ship movement and static asteroids). This is an initial remake of Asteroids to iterate on.
 
@@ -77,7 +77,7 @@ If you want, I can:
 ---
 
 Initial status
-- **Version:** 0.1
-- **Notes:** First functional prototype — the project builds with CMake/vcpkg, links SDL2 correctly, and the `starboy.exe` executable runs a minimal playable prototype (ship movement and static asteroids). This is an initial remake of Asteroids to iterate on.
+- **Version:** 0.2
+- **Notes:** Builds with CMake/vcpkg. Current prototype includes ship movement, thrust visuals, deterministic parallax starfield with twinkle presets, occasional shooting stars and sparks, in-game menu with settings, and basic asteroid collision handling. See `starboy_settings.txt` for persisted visual settings.
 
 If you'd like, I can push this as a new repository under your GitHub account (username `SoyInfinito`) — tell me the repository name and whether you want SSH (`git@github.com:...`) or HTTPS remote, and I'll push it (assuming your local environment has credentials/keys set up).
