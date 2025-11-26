@@ -121,6 +121,9 @@ int main(int argc, char** argv) {
     std::vector<Vec2> stars;
     std::vector<int> starBase;
     std::vector<float> starDepth; // 0.0 = far, 1.0 = near (for parallax)
+    std::vector<float> starTwinkleFreq;
+    std::vector<float> starTwinklePhase;
+    std::vector<float> starTwinkleAmp;
 
     auto createAsteroids = [&](std::vector<Asteroid>& out) {
         out.clear();
@@ -183,9 +186,15 @@ int main(int argc, char** argv) {
         std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
         std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
         std::uniform_real_distribution<float> rz(0.0f, 1.0f);
+        std::uniform_real_distribution<float> rfreq(0.6f, 3.2f);
+        std::uniform_real_distribution<float> ramp(0.12f, 0.68f);
+        std::uniform_real_distribution<float> rphase(0.0f, 2.0f * 3.14159265f);
         stars.clear();
         starBase.clear();
         starDepth.clear();
+        starTwinkleFreq.clear();
+        starTwinklePhase.clear();
+        starTwinkleAmp.clear();
         for (int i = 0; i < STAR_COUNT; ++i) {
             // world position
             stars.push_back({ rx(rng), ry(rng) });
@@ -193,7 +202,15 @@ int main(int argc, char** argv) {
             starBase.push_back((i % 3) + 1);
             // depth: bias towards farther stars (square the random)
             float z = rz(rng);
-            starDepth.push_back(z * z);
+            float depth = z * z; // bias towards farther stars
+            starDepth.push_back(depth);
+            // twinkle parameters: frequency, phase, amplitude (scaled by depth so nearer stars can have stronger twinkle)
+            float freq = rfreq(rng);
+            float phase = rphase(rng);
+            float amp = ramp(rng) * (0.4f + 0.6f * depth);
+            starTwinkleFreq.push_back(freq);
+            starTwinklePhase.push_back(phase);
+            starTwinkleAmp.push_back(amp);
         }
     }
 
@@ -364,8 +381,12 @@ int main(int argc, char** argv) {
                 sx = wrap(sx, 0.0f, static_cast<float>(W));
                 sy = wrap(sy, 0.0f, static_cast<float>(H));
 
-                // small twinkle tuned by depth (near stars twinkle slightly faster)
-                float flick = 0.6f + 0.4f * std::sin(tt * (0.5f + (si % 7) * 0.06f) + depth * 3.0f);
+                // twinkle computed per-star using precomputed freq/phase/amp
+                float freq = (si < starTwinkleFreq.size()) ? starTwinkleFreq[si] : (0.8f + (si % 3) * 0.2f);
+                float phase = (si < starTwinklePhase.size()) ? starTwinklePhase[si] : 0.0f;
+                float amp = (si < starTwinkleAmp.size()) ? starTwinkleAmp[si] : 0.25f;
+                float tw = 0.5f + 0.5f * std::sin(tt * freq + phase); // 0..1
+                float flick = 0.6f + 0.4f * (0.6f * tw + 0.4f * (1.0f - depth)) * (1.0f + amp * 0.8f);
                 int base = starBase[si % starBase.size()];
                 int alpha = static_cast<int>(40 + 120 * flick * (0.4f + 0.6f * depth));
                 Uint8 col = static_cast<Uint8>(200 * (0.6f + 0.4f * depth));
