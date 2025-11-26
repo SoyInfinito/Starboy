@@ -246,8 +246,13 @@ int main(int argc, char** argv) {
 
     // Menu state
     bool menuOpen = false;
-    std::vector<const char*> menuItems = { "Resume", "Restart", "Quit" };
+    // Added "Settings" entry
+    std::vector<const char*> menuItems = { "Resume", "Settings", "Restart", "Quit" };
     int menuSelection = 0;
+    // Settings submenu
+    bool inSettings = false;
+    int settingsSelection = 0;
+    std::vector<const char*> settingsItemsStatic = { "Shooting Stars", "Back" };
     // Twinkle controls
     // debug toggle: extremely strong twinkle for testing (press T)
     bool starTwinkleDebug = false;
@@ -332,6 +337,7 @@ int main(int argc, char** argv) {
                             if (slot >= 0 && slot < (int)menuItems.size()) {
                                 const char* sel = menuItems[slot];
                                 if (strcmp(sel, "Resume") == 0) { menuOpen = false; }
+                                else if (strcmp(sel, "Settings") == 0) { inSettings = true; settingsSelection = 0; }
                                 else if (strcmp(sel, "Restart") == 0) { restartGame(); menuOpen = false; }
                                 else if (strcmp(sel, "Quit") == 0) { running = false; }
                             }
@@ -361,15 +367,33 @@ int main(int argc, char** argv) {
                     saveSettings();
                 }
                 if (menuOpen) {
-                    if (ev.key.keysym.sym == SDLK_UP) {
-                        menuSelection = (menuSelection - 1 + (int)menuItems.size()) % (int)menuItems.size();
-                    } else if (ev.key.keysym.sym == SDLK_DOWN) {
-                        menuSelection = (menuSelection + 1) % (int)menuItems.size();
-                    } else if (ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_KP_ENTER) {
-                        const char* sel = menuItems[menuSelection];
-                        if (strcmp(sel, "Resume") == 0) { menuOpen = false; }
-                        else if (strcmp(sel, "Restart") == 0) { restartGame(); menuOpen = false; }
-                        else if (strcmp(sel, "Quit") == 0) { running = false; }
+                    if (!inSettings) {
+                        if (ev.key.keysym.sym == SDLK_UP) {
+                            menuSelection = (menuSelection - 1 + (int)menuItems.size()) % (int)menuItems.size();
+                        } else if (ev.key.keysym.sym == SDLK_DOWN) {
+                            menuSelection = (menuSelection + 1) % (int)menuItems.size();
+                        } else if (ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_KP_ENTER) {
+                            const char* sel = menuItems[menuSelection];
+                            if (strcmp(sel, "Resume") == 0) { menuOpen = false; }
+                            else if (strcmp(sel, "Settings") == 0) { inSettings = true; settingsSelection = 0; }
+                            else if (strcmp(sel, "Restart") == 0) { restartGame(); menuOpen = false; }
+                            else if (strcmp(sel, "Quit") == 0) { running = false; }
+                        }
+                    } else {
+                        // in settings submenu
+                        if (ev.key.keysym.sym == SDLK_UP) {
+                            settingsSelection = (settingsSelection - 1 + (int)settingsItemsStatic.size()) % (int)settingsItemsStatic.size();
+                        } else if (ev.key.keysym.sym == SDLK_DOWN) {
+                            settingsSelection = (settingsSelection + 1) % (int)settingsItemsStatic.size();
+                        } else if (ev.key.keysym.sym == SDLK_RETURN || ev.key.keysym.sym == SDLK_KP_ENTER) {
+                            if (settingsSelection == 0) {
+                                // toggle shooting stars
+                                shootingStarsEnabled = !shootingStarsEnabled;
+                                saveSettings();
+                            } else if (settingsSelection == 1) {
+                                inSettings = false;
+                            }
+                        }
                     }
                 }
                 // quick keyboard shortcuts
@@ -715,39 +739,80 @@ int main(int argc, char** argv) {
             int itemH = 40;
             SDL_Color white{240,240,240,255};
             SDL_Color yellow{255,220,40,255};
-            for (size_t i = 0; i < menuItems.size(); ++i) {
-                int ix = mx + padding;
-                int iy = my + padding + static_cast<int>(i) * (itemH + 6);
-                // highlight
-                if ((int)i == menuSelection) {
-                    SDL_SetRenderDrawColor(ren, 60, 60, 80, 200);
-                    SDL_Rect h{ix-8, iy-6, menuW - padding*2 + 16, itemH+8};
-                    SDL_RenderFillRect(ren, &h);
-                }
-                // draw a small arrow indicator for selection (even without font)
-                if ((int)i == menuSelection) {
-                    SDL_SetRenderDrawColor(ren, 255, 220, 40, 255);
-                    SDL_RenderDrawLine(ren, ix - 14, iy + itemH/2, ix - 6, iy + itemH/2 - 6);
-                    SDL_RenderDrawLine(ren, ix - 14, iy + itemH/2, ix - 6, iy + itemH/2 + 6);
-                }
-                // render text if font available
-                int tw = 0, th = 0;
-                SDL_Texture* txt = renderText(ren, font, menuItems[i], white, tw, th);
-                if (txt) {
-                    SDL_Rect dst{ ix + 10, iy + (itemH - th)/2, tw, th };
+            if (!inSettings) {
+                for (size_t i = 0; i < menuItems.size(); ++i) {
+                    int ix = mx + padding;
+                    int iy = my + padding + static_cast<int>(i) * (itemH + 6);
+                    // highlight
                     if ((int)i == menuSelection) {
-                        // draw selected in yellow
-                        SDL_DestroyTexture(txt);
-                        txt = renderText(ren, font, menuItems[i], yellow, tw, th);
-                        dst.w = tw; dst.h = th;
+                        SDL_SetRenderDrawColor(ren, 60, 60, 80, 200);
+                        SDL_Rect h{ix-8, iy-6, menuW - padding*2 + 16, itemH+8};
+                        SDL_RenderFillRect(ren, &h);
                     }
-                    SDL_RenderCopy(ren, txt, NULL, &dst);
-                    SDL_DestroyTexture(txt);
-                } else {
-                    // fallback: draw label rectangle
-                    SDL_SetRenderDrawColor(ren, 120, 120, 140, 255);
-                    SDL_Rect lbl{ ix+10, iy + (itemH/4), 140, itemH/2 };
-                    SDL_RenderFillRect(ren, &lbl);
+                    // draw a small arrow indicator for selection (even without font)
+                    if ((int)i == menuSelection) {
+                        SDL_SetRenderDrawColor(ren, 255, 220, 40, 255);
+                        SDL_RenderDrawLine(ren, ix - 14, iy + itemH/2, ix - 6, iy + itemH/2 - 6);
+                        SDL_RenderDrawLine(ren, ix - 14, iy + itemH/2, ix - 6, iy + itemH/2 + 6);
+                    }
+                    // render text if font available
+                    int tw = 0, th = 0;
+                    SDL_Texture* txt = renderText(ren, font, menuItems[i], white, tw, th);
+                    if (txt) {
+                        SDL_Rect dst{ ix + 10, iy + (itemH - th)/2, tw, th };
+                        if ((int)i == menuSelection) {
+                            // draw selected in yellow
+                            SDL_DestroyTexture(txt);
+                            txt = renderText(ren, font, menuItems[i], yellow, tw, th);
+                            dst.w = tw; dst.h = th;
+                        }
+                        SDL_RenderCopy(ren, txt, NULL, &dst);
+                        SDL_DestroyTexture(txt);
+                    } else {
+                        // fallback: draw label rectangle
+                        SDL_SetRenderDrawColor(ren, 120, 120, 140, 255);
+                        SDL_Rect lbl{ ix+10, iy + (itemH/4), 140, itemH/2 };
+                        SDL_RenderFillRect(ren, &lbl);
+                    }
+                }
+            } else {
+                // settings submenu rendering
+                for (size_t i = 0; i < settingsItemsStatic.size(); ++i) {
+                    int ix = mx + padding;
+                    int iy = my + padding + static_cast<int>(i) * (itemH + 6);
+                    if ((int)i == settingsSelection) {
+                        SDL_SetRenderDrawColor(ren, 60, 60, 80, 200);
+                        SDL_Rect h{ix-8, iy-6, menuW - padding*2 + 16, itemH+8};
+                        SDL_RenderFillRect(ren, &h);
+                    }
+                    // draw arrow for selection
+                    if ((int)i == settingsSelection) {
+                        SDL_SetRenderDrawColor(ren, 255, 220, 40, 255);
+                        SDL_RenderDrawLine(ren, ix - 14, iy + itemH/2, ix - 6, iy + itemH/2 - 6);
+                        SDL_RenderDrawLine(ren, ix - 14, iy + itemH/2, ix - 6, iy + itemH/2 + 6);
+                    }
+                    // prepare label (dynamic for shooting stars)
+                    std::string label;
+                    if (i == 0) {
+                        label = std::string("Shooting Stars: ") + (shootingStarsEnabled ? "On" : "Off");
+                    } else {
+                        label = settingsItemsStatic[i];
+                    }
+                    int tw = 0, th = 0;
+                    SDL_Texture* txt = renderText(ren, font, label.c_str(), white, tw, th);
+                    if (txt) {
+                        SDL_Rect dst{ ix + 10, iy + (itemH - th)/2, tw, th };
+                        if ((int)i == settingsSelection) {
+                            SDL_DestroyTexture(txt);
+                            txt = renderText(ren, font, label.c_str(), yellow, tw, th);
+                        }
+                        SDL_RenderCopy(ren, txt, NULL, &dst);
+                        SDL_DestroyTexture(txt);
+                    } else {
+                        SDL_SetRenderDrawColor(ren, 120, 120, 140, 255);
+                        SDL_Rect lbl{ ix+10, iy + (itemH/4), 140, itemH/2 };
+                        SDL_RenderFillRect(ren, &lbl);
+                    }
                 }
             }
 
