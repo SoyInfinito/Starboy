@@ -225,6 +225,8 @@ int main(int argc, char** argv) {
     bool menuOpen = false;
     std::vector<const char*> menuItems = { "Resume", "Restart", "Quit" };
     int menuSelection = 0;
+    // Debug: toggle stronger twinkle so it's visible during testing
+    bool starTwinkleDebug = false;
 
     auto renderText = [&](SDL_Renderer* r, TTF_Font* f, const char* text, SDL_Color col, int& outW, int& outH)->SDL_Texture* {
         outW = outH = 0;
@@ -292,6 +294,10 @@ int main(int argc, char** argv) {
                 if (ev.key.keysym.sym == SDLK_ESCAPE) {
                     menuOpen = !menuOpen;
                     menuSelection = 0;
+                }
+                // debug: toggle twinkle boost
+                if (ev.key.keysym.sym == SDLK_t) {
+                    starTwinkleDebug = !starTwinkleDebug;
                 }
                 if (menuOpen) {
                     if (ev.key.keysym.sym == SDLK_UP) {
@@ -386,7 +392,8 @@ int main(int argc, char** argv) {
                 float phase = (si < starTwinklePhase.size()) ? starTwinklePhase[si] : 0.0f;
                 float amp = (si < starTwinkleAmp.size()) ? starTwinkleAmp[si] : 0.25f;
                 float tw = 0.5f + 0.5f * std::sin(tt * freq + phase); // 0..1
-                float flick = 0.6f + 0.4f * (0.6f * tw + 0.4f * (1.0f - depth)) * (1.0f + amp * 0.8f);
+                float debugBoost = starTwinkleDebug ? 3.0f : 1.0f;
+                float flick = 0.6f + 0.4f * (0.6f * tw + 0.4f * (1.0f - depth)) * (1.0f + amp * 0.8f * debugBoost);
                 int base = starBase[si % starBase.size()];
                 int alpha = static_cast<int>(40 + 120 * flick * (0.4f + 0.6f * depth));
                 Uint8 col = static_cast<Uint8>(200 * (0.6f + 0.4f * depth));
@@ -402,6 +409,15 @@ int main(int argc, char** argv) {
             }
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
         }
+
+        // small debug indicator for twinkle boost (top-right)
+        if (starTwinkleDebug) {
+            SDL_SetRenderDrawColor(ren, 60, 200, 80, 255);
+        } else {
+            SDL_SetRenderDrawColor(ren, 80, 80, 80, 255);
+        }
+        SDL_Rect dbg{ W - 18, 6, 12, 12 };
+        SDL_RenderFillRect(ren, &dbg);
 
         // Draw asteroids
         SDL_SetRenderDrawColor(ren, 180, 180, 160, 255);
