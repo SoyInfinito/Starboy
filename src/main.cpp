@@ -2,6 +2,7 @@
 #include <vector>
 #include <cmath>
 #include <chrono>
+#include <random>
 #include <cstring>
 #if defined(__has_include)
 #  if __has_include(<SDL_ttf.h>)
@@ -116,6 +117,9 @@ int main(int argc, char** argv) {
 
     // Asteroids - simple fixed ones
     std::vector<Asteroid> asts;
+    // Background stars (non-colliding visual layer)
+    std::vector<Vec2> stars;
+    std::vector<int> starBase;
 
     auto createAsteroids = [&](std::vector<Asteroid>& out) {
         out.clear();
@@ -169,6 +173,21 @@ int main(int argc, char** argv) {
         };
 
     createAsteroids(asts);
+
+    // generate a deterministic star field (small, non-colliding background)
+    const int STAR_COUNT = 140;
+    {
+        // fixed-seed PRNG for repeatability and even distribution
+        std::mt19937 rng(1234567);
+        std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
+        std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
+        stars.clear();
+        starBase.clear();
+        for (int i = 0; i < STAR_COUNT; ++i) {
+            stars.push_back({ rx(rng), ry(rng) });
+            starBase.push_back((i % 3) + 1);
+        }
+    }
 
     auto restartGame = [&](void) {
         shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
@@ -323,6 +342,21 @@ int main(int argc, char** argv) {
         SDL_RenderClear(ren);
 
         // Update and draw asteroids
+        // Draw background stars
+        if (!stars.empty()) {
+            float tt = SDL_GetTicks() * 0.001f;
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            for (size_t si = 0; si < stars.size(); ++si) {
+                float flick = 0.6f + 0.4f * std::sin(tt * (0.5f + (si % 7) * 0.06f));
+                int base = starBase[si % starBase.size()];
+                int alpha = static_cast<int>(50 + 80 * flick * (base / 3.0f));
+                SDL_SetRenderDrawColor(ren, 200, 200, 220, alpha);
+                SDL_RenderDrawPoint(ren, static_cast<int>(stars[si].x), static_cast<int>(stars[si].y));
+            }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        }
+
+        // Draw asteroids
         SDL_SetRenderDrawColor(ren, 180, 180, 160, 255);
         for (auto &a : asts) {
             // update position
