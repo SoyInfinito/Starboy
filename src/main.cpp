@@ -140,6 +140,30 @@ int main(int argc, char** argv) {
         }
     };
 
+        // Split an asteroid into two smaller ones (deterministic, small offsets)
+        auto splitAsteroid = [&](const Asteroid &src, std::vector<Asteroid> &out) {
+            // only split large asteroids
+            if (src.radius < 18.0f) return;
+            // produce two children with different scales and small offsets
+            const float scales[2] = {0.6f, 0.5f};
+            const float offsets[2][2] = {{-8.0f, -6.0f}, {8.0f, 6.0f}};
+            for (int i = 0; i < 2; ++i) {
+                Asteroid b;
+                b.pos.x = src.pos.x + offsets[i][0];
+                b.pos.y = src.pos.y + offsets[i][1];
+                float maxr = 0.0f;
+                for (const auto &p : src.shape) {
+                    float px = p.x * scales[i];
+                    float py = p.y * scales[i];
+                    b.shape.push_back({px, py});
+                    float len = std::sqrt(px*px + py*py);
+                    if (len > maxr) maxr = len;
+                }
+                b.radius = maxr;
+                out.push_back(std::move(b));
+            }
+        };
+
     createAsteroids(asts);
 
     auto restartGame = [&](void) {
@@ -262,14 +286,20 @@ int main(int argc, char** argv) {
 
         // Simple collision detection: ship vs asteroid (circle-circle approx)
         for (int i = static_cast<int>(asts.size()) - 1; i >= 0; --i) {
-            const Asteroid& a = asts[i];
+            const Asteroid a = asts[i];
             float dx = shipPos.x - a.pos.x;
             float dy = shipPos.y - a.pos.y;
             float dist2 = dx*dx + dy*dy;
             float r = shipRadius + a.radius;
             if (dist2 <= r * r) {
-                // Collision occurred: remove asteroid and reset ship position/velocity
+                // Collision occurred: split asteroid if large enough, otherwise remove
+                std::vector<Asteroid> children;
+                splitAsteroid(a, children);
+                // erase the original
                 asts.erase(asts.begin() + i);
+                // insert children (if any)
+                for (auto &c : children) asts.push_back(std::move(c));
+                // reset ship
                 shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
                 shipVel = { 0.0f, 0.0f };
                 collisionFlash = 0.6f;
