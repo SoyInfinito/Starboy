@@ -2,6 +2,7 @@
 #include <vector>
 #include <cmath>
 #include <chrono>
+#include <random>
 #include <cstring>
 #if defined(__has_include)
 #  if __has_include(<SDL_ttf.h>)
@@ -69,6 +70,8 @@ static void drawFilledTriangle(SDL_Renderer* r, Vec2 p0, Vec2 p1, Vec2 p2) {
 struct Asteroid {
     Vec2 pos;
     std::vector<Vec2> shape; // relative
+    float radius; // approximate collision radius
+    Vec2 vel{0.0f, 0.0f};
 };
 
 int main(int argc, char** argv) {
@@ -114,6 +117,9 @@ int main(int argc, char** argv) {
 
     // Asteroids - simple fixed ones
     std::vector<Asteroid> asts;
+    // Background stars (non-colliding visual layer)
+    std::vector<Vec2> stars;
+    std::vector<int> starBase;
 
     auto createAsteroids = [&](std::vector<Asteroid>& out) {
         out.clear();
@@ -124,16 +130,64 @@ int main(int argc, char** argv) {
             int verts = 6 + (i % 3);
             float rradius = 30.0f + (i % 4) * 10.0f;
             a.shape.reserve(verts);
+            float maxr = 0.0f;
             for (int v = 0; v < verts; ++v) {
                 float ang = static_cast<float>(v) / verts * 2.0f * 3.14159265f;
                 float rr = rradius * (0.8f + 0.4f * std::sin(v * 1.3f + i));
-                a.shape.push_back({ std::cos(ang) * rr, std::sin(ang) * rr });
+                float px = std::cos(ang) * rr;
+                float py = std::sin(ang) * rr;
+                a.shape.push_back({ px, py });
+                float len = std::sqrt(px*px + py*py);
+                if (len > maxr) maxr = len;
             }
+            a.radius = maxr;
+            // initial velocity (small drift) - deterministic based on index
+            a.vel.x = (i % 2 == 0) ? 8.0f : -6.0f;
+            a.vel.y = ((i % 3) - 1) * 4.0f;
             out.push_back(std::move(a));
         }
     };
 
+        // Split an asteroid into two smaller ones (deterministic, small offsets)
+        auto splitAsteroid = [&](const Asteroid &src, std::vector<Asteroid> &out) {
+            // only split large asteroids
+            if (src.radius < 18.0f) return;
+            // produce two children with different scales and small offsets
+            const float scales[2] = {0.6f, 0.5f};
+            const float offsets[2][2] = {{-8.0f, -6.0f}, {8.0f, 6.0f}};
+            for (int i = 0; i < 2; ++i) {
+                Asteroid b;
+                b.pos.x = src.pos.x + offsets[i][0];
+                b.pos.y = src.pos.y + offsets[i][1];
+                float maxr = 0.0f;
+                for (const auto &p : src.shape) {
+                    float px = p.x * scales[i];
+                    float py = p.y * scales[i];
+                    b.shape.push_back({px, py});
+                    float len = std::sqrt(px*px + py*py);
+                    if (len > maxr) maxr = len;
+                }
+                b.radius = maxr;
+                out.push_back(std::move(b));
+            }
+        };
+
     createAsteroids(asts);
+
+    // generate a deterministic star field (small, non-colliding background)
+    const int STAR_COUNT = 140;
+    {
+        // fixed-seed PRNG for repeatability and even distribution
+        std::mt19937 rng(1234567);
+        std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
+        std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
+        stars.clear();
+        starBase.clear();
+        for (int i = 0; i < STAR_COUNT; ++i) {
+            stars.push_back({ rx(rng), ry(rng) });
+            starBase.push_back((i % 3) + 1);
+        }
+    }
 
     auto restartGame = [&](void) {
         shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
@@ -164,6 +218,9 @@ int main(int argc, char** argv) {
     };
 
     auto last = std::chrono::high_resolution_clock::now();
+    // collision / gameplay state
+    const float shipRadius = 14.0f; // used for simple collision test
+    float collisionFlash = 0.0f; // seconds to show collision flash
     bool running = true;
     while (running) {
         auto now = std::chrono::high_resolution_clock::now();
@@ -250,19 +307,82 @@ int main(int argc, char** argv) {
         shipPos.x = wrap(shipPos.x, 0.0f, static_cast<float>(W));
         shipPos.y = wrap(shipPos.y, 0.0f, static_cast<float>(H));
 
+        // Simple collision detection: ship vs asteroid (circle-circle approx)
+        for (int i = static_cast<int>(asts.size()) - 1; i >= 0; --i) {
+            const Asteroid a = asts[i];
+            float dx = shipPos.x - a.pos.x;
+            float dy = shipPos.y - a.pos.y;
+            float dist2 = dx*dx + dy*dy;
+            float r = shipRadius + a.radius;
+            if (dist2 <= r * r) {
+                // Collision occurred: split asteroid if large enough, otherwise remove
+                std::vector<Asteroid> children;
+                splitAsteroid(a, children);
+                // erase the original
+                asts.erase(asts.begin() + i);
+                // if children produced, set small velocities for them
+                for (size_t ci = 0; ci < children.size(); ++ci) {
+                    // velocity roughly perpendicular to offset direction
+                    float vx = (ci == 0) ? -40.0f : 40.0f;
+                    float vy = (ci == 0) ? -24.0f : 24.0f;
+                    children[ci].vel.x = vx;
+                    children[ci].vel.y = vy;
+                    asts.push_back(std::move(children[ci]));
+                }
+                // reset ship
+                shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
+                shipVel = { 0.0f, 0.0f };
+                collisionFlash = 0.6f;
+                break; // handle one collision per frame
+            }
+        }
+
         // Render
         SDL_SetRenderDrawColor(ren, 8, 8, 20, 255);
         SDL_RenderClear(ren);
 
+        // Update and draw asteroids
+        // Draw background stars
+        if (!stars.empty()) {
+            float tt = SDL_GetTicks() * 0.001f;
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            for (size_t si = 0; si < stars.size(); ++si) {
+                float flick = 0.6f + 0.4f * std::sin(tt * (0.5f + (si % 7) * 0.06f));
+                int base = starBase[si % starBase.size()];
+                int alpha = static_cast<int>(50 + 80 * flick * (base / 3.0f));
+                SDL_SetRenderDrawColor(ren, 200, 200, 220, alpha);
+                SDL_RenderDrawPoint(ren, static_cast<int>(stars[si].x), static_cast<int>(stars[si].y));
+            }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        }
+
         // Draw asteroids
         SDL_SetRenderDrawColor(ren, 180, 180, 160, 255);
-        for (const auto& a : asts) {
+        for (auto &a : asts) {
+            // update position
+            a.pos.x += a.vel.x * dt;
+            a.pos.y += a.vel.y * dt;
+            a.pos.x = wrap(a.pos.x, 0.0f, static_cast<float>(W));
+            a.pos.y = wrap(a.pos.y, 0.0f, static_cast<float>(H));
             std::vector<Vec2> absPts;
             absPts.reserve(a.shape.size());
             for (const auto& p : a.shape) {
                 absPts.push_back({p.x + a.pos.x, p.y + a.pos.y});
             }
             drawPolygon(ren, absPts);
+        }
+
+        // collision flash overlay (brief)
+        if (collisionFlash > 0.0f) {
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            int alpha = static_cast<int>(std::min(255.0f, collisionFlash / 0.6f * 220.0f));
+            SDL_SetRenderDrawColor(ren, 220, 60, 60, alpha);
+            SDL_Rect full{0,0,W,H};
+            SDL_RenderFillRect(ren, &full);
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+            // decrease timer
+            collisionFlash -= dt;
+            if (collisionFlash < 0.0f) collisionFlash = 0.0f;
         }
 
         // Draw a small menu icon (top-left)
