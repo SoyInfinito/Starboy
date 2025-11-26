@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
     // presets: Subtle / Normal / Normal+ (cycle with Y). Default is Normal+ (close to T but weaker)
     int starTwinklePreset = 2; // 0=subtle,1=normal,2=normal+
     const char* starTwinklePresetNames[] = { "Subtle", "Normal", "Normal+" };
-    const float starTwinklePresetBoost[] = { 0.9f, 1.0f, 3.0f };
+    const float starTwinklePresetBoost[] = { 0.9f, 1.0f, 3.3f };
 
     auto renderText = [&](SDL_Renderer* r, TTF_Font* f, const char* text, SDL_Color col, int& outW, int& outH)->SDL_Texture* {
         outW = outH = 0;
