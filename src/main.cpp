@@ -225,8 +225,13 @@ int main(int argc, char** argv) {
     bool menuOpen = false;
     std::vector<const char*> menuItems = { "Resume", "Restart", "Quit" };
     int menuSelection = 0;
-    // Debug: toggle stronger twinkle so it's visible during testing
+    // Twinkle controls
+    // debug toggle: extremely strong twinkle for testing (press T)
     bool starTwinkleDebug = false;
+    // presets: Subtle / Normal / Normal+ (cycle with Y). Default is Normal+ (close to T but weaker)
+    int starTwinklePreset = 2; // 0=subtle,1=normal,2=normal+
+    const char* starTwinklePresetNames[] = { "Subtle", "Normal", "Normal+" };
+    const float starTwinklePresetBoost[] = { 0.9f, 1.0f, 2.0f };
 
     auto renderText = [&](SDL_Renderer* r, TTF_Font* f, const char* text, SDL_Color col, int& outW, int& outH)->SDL_Texture* {
         outW = outH = 0;
@@ -295,9 +300,13 @@ int main(int argc, char** argv) {
                     menuOpen = !menuOpen;
                     menuSelection = 0;
                 }
-                // debug: toggle twinkle boost
+                // debug: toggle twinkle boost (strong)
                 if (ev.key.keysym.sym == SDLK_t) {
                     starTwinkleDebug = !starTwinkleDebug;
+                }
+                // cycle twinkle presets (Y)
+                if (ev.key.keysym.sym == SDLK_y) {
+                    starTwinklePreset = (starTwinklePreset + 1) % 3;
                 }
                 if (menuOpen) {
                     if (ev.key.keysym.sym == SDLK_UP) {
@@ -392,14 +401,29 @@ int main(int argc, char** argv) {
                 float phase = (si < starTwinklePhase.size()) ? starTwinklePhase[si] : 0.0f;
                 float amp = (si < starTwinkleAmp.size()) ? starTwinkleAmp[si] : 0.25f;
                 float tw = 0.5f + 0.5f * std::sin(tt * freq + phase); // 0..1
-                float debugBoost = starTwinkleDebug ? 3.0f : 1.0f;
-                float flick = 0.6f + 0.4f * (0.6f * tw + 0.4f * (1.0f - depth)) * (1.0f + amp * 0.8f * debugBoost);
+                // preset boost (close to T but gentler by default) and optional debug multiplier
+                float presetBoost = starTwinklePresetBoost[starTwinklePreset];
+                float debugExtra = starTwinkleDebug ? 1.75f : 1.0f; // T multiplies by ~1.75 on top of preset
+                float totalBoost = presetBoost * debugExtra;
+                float flick = 0.6f + 0.4f * (0.6f * tw + 0.4f * (1.0f - depth)) * (1.0f + amp * 0.8f * totalBoost);
                 int base = starBase[si % starBase.size()];
-                int alpha = static_cast<int>(40 + 120 * flick * (0.4f + 0.6f * depth));
-                Uint8 col = static_cast<Uint8>(200 * (0.6f + 0.4f * depth));
-                SDL_SetRenderDrawColor(ren, col, col, 230, alpha);
-
+                // make debug mode much more visible: larger alpha swings and pulsing size
+                int alpha;
+                Uint8 col;
                 int size = base + ((depth > 0.8f) ? 1 : 0);
+                if (starTwinkleDebug) {
+                    // stronger alpha range and slight color shift for visibility
+                    alpha = static_cast<int>(20 + 235 * ((0.25f + 0.75f * tw) * (0.5f + 0.5f * depth)));
+                    float colorMul = 0.5f + 0.5f * tw + 0.2f * depth;
+                    col = static_cast<Uint8>(220 * std::min(1.0f, colorMul));
+                    // pulse size briefly with twinkle
+                    size += static_cast<int>(2.0f * tw + 0.5f);
+                } else {
+                    alpha = static_cast<int>(40 + 120 * flick * (0.4f + 0.6f * depth));
+                    col = static_cast<Uint8>(200 * (0.6f + 0.4f * depth));
+                }
+                SDL_SetRenderDrawColor(ren, col, col, 230, std::max(0, std::min(255, alpha)));
+
                 if (size <= 1) {
                     SDL_RenderDrawPoint(ren, static_cast<int>(sx), static_cast<int>(sy));
                 } else {
@@ -410,12 +434,18 @@ int main(int argc, char** argv) {
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
         }
 
-        // small debug indicator for twinkle boost (top-right)
-        if (starTwinkleDebug) {
-            SDL_SetRenderDrawColor(ren, 60, 200, 80, 255);
-        } else {
-            SDL_SetRenderDrawColor(ren, 80, 80, 80, 255);
+        // small debug indicator (top-right): preset dots + debug square
+        int baseX = W - 72; // room for 3 dots + spacing
+        int dotY = 8;
+        for (int pi = 0; pi < 3; ++pi) {
+            if (pi == starTwinklePreset) SDL_SetRenderDrawColor(ren, 255, 220, 40, 255);
+            else SDL_SetRenderDrawColor(ren, 120, 120, 140, 255);
+            SDL_Rect d{ baseX + pi * 18, dotY, 10, 10 };
+            SDL_RenderFillRect(ren, &d);
         }
+        // debug strong indicator (small square)
+        if (starTwinkleDebug) SDL_SetRenderDrawColor(ren, 60, 200, 80, 255);
+        else SDL_SetRenderDrawColor(ren, 80, 80, 80, 255);
         SDL_Rect dbg{ W - 18, 6, 12, 12 };
         SDL_RenderFillRect(ren, &dbg);
 
