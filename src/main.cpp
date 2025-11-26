@@ -69,6 +69,7 @@ static void drawFilledTriangle(SDL_Renderer* r, Vec2 p0, Vec2 p1, Vec2 p2) {
 struct Asteroid {
     Vec2 pos;
     std::vector<Vec2> shape; // relative
+    float radius; // approximate collision radius
 };
 
 int main(int argc, char** argv) {
@@ -124,11 +125,17 @@ int main(int argc, char** argv) {
             int verts = 6 + (i % 3);
             float rradius = 30.0f + (i % 4) * 10.0f;
             a.shape.reserve(verts);
+            float maxr = 0.0f;
             for (int v = 0; v < verts; ++v) {
                 float ang = static_cast<float>(v) / verts * 2.0f * 3.14159265f;
                 float rr = rradius * (0.8f + 0.4f * std::sin(v * 1.3f + i));
-                a.shape.push_back({ std::cos(ang) * rr, std::sin(ang) * rr });
+                float px = std::cos(ang) * rr;
+                float py = std::sin(ang) * rr;
+                a.shape.push_back({ px, py });
+                float len = std::sqrt(px*px + py*py);
+                if (len > maxr) maxr = len;
             }
+            a.radius = maxr;
             out.push_back(std::move(a));
         }
     };
@@ -164,6 +171,9 @@ int main(int argc, char** argv) {
     };
 
     auto last = std::chrono::high_resolution_clock::now();
+    // collision / gameplay state
+    const float shipRadius = 14.0f; // used for simple collision test
+    float collisionFlash = 0.0f; // seconds to show collision flash
     bool running = true;
     while (running) {
         auto now = std::chrono::high_resolution_clock::now();
@@ -250,6 +260,23 @@ int main(int argc, char** argv) {
         shipPos.x = wrap(shipPos.x, 0.0f, static_cast<float>(W));
         shipPos.y = wrap(shipPos.y, 0.0f, static_cast<float>(H));
 
+        // Simple collision detection: ship vs asteroid (circle-circle approx)
+        for (int i = static_cast<int>(asts.size()) - 1; i >= 0; --i) {
+            const Asteroid& a = asts[i];
+            float dx = shipPos.x - a.pos.x;
+            float dy = shipPos.y - a.pos.y;
+            float dist2 = dx*dx + dy*dy;
+            float r = shipRadius + a.radius;
+            if (dist2 <= r * r) {
+                // Collision occurred: remove asteroid and reset ship position/velocity
+                asts.erase(asts.begin() + i);
+                shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
+                shipVel = { 0.0f, 0.0f };
+                collisionFlash = 0.6f;
+                break; // handle one collision per frame
+            }
+        }
+
         // Render
         SDL_SetRenderDrawColor(ren, 8, 8, 20, 255);
         SDL_RenderClear(ren);
@@ -263,6 +290,19 @@ int main(int argc, char** argv) {
                 absPts.push_back({p.x + a.pos.x, p.y + a.pos.y});
             }
             drawPolygon(ren, absPts);
+        }
+
+        // collision flash overlay (brief)
+        if (collisionFlash > 0.0f) {
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            int alpha = static_cast<int>(std::min(255.0f, collisionFlash / 0.6f * 220.0f));
+            SDL_SetRenderDrawColor(ren, 220, 60, 60, alpha);
+            SDL_Rect full{0,0,W,H};
+            SDL_RenderFillRect(ren, &full);
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+            // decrease timer
+            collisionFlash -= dt;
+            if (collisionFlash < 0.0f) collisionFlash = 0.0f;
         }
 
         // Draw a small menu icon (top-left)
