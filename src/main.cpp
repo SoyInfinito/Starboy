@@ -75,6 +75,22 @@ struct Asteroid {
     Vec2 vel{0.0f, 0.0f};
 };
 
+// Visual event: short bright spark (pop) and moving shooting star
+struct Spark {
+    Vec2 pos;
+    float life = 0.0f;
+    float maxLife = 0.2f;
+    float size = 2.0f;
+};
+
+struct ShootingStar {
+    Vec2 pos;
+    Vec2 vel;
+    float life = 0.0f;
+    float maxLife = 1.2f;
+    float length = 40.0f; // trail length
+};
+
 int main(int argc, char** argv) {
     (void)argc; (void)argv;
     if (SDL_Init(SDL_INIT_VIDEO) != 0) return -1;
@@ -125,6 +141,11 @@ int main(int argc, char** argv) {
     std::vector<float> starTwinkleFreq;
     std::vector<float> starTwinklePhase;
     std::vector<float> starTwinkleAmp;
+    // runtime visual events
+    std::vector<Spark> sparks;
+    std::vector<ShootingStar> shootingStars;
+    // RNG for runtime events (non-deterministic)
+    std::mt19937 runtimeRng(static_cast<unsigned>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
 
     auto createAsteroids = [&](std::vector<Asteroid>& out) {
         out.clear();
@@ -402,6 +423,50 @@ int main(int argc, char** argv) {
         SDL_SetRenderDrawColor(ren, 8, 8, 20, 255);
         SDL_RenderClear(ren);
 
+        // Spawn occasional sparks and rare shooting stars
+        {
+            std::uniform_real_distribution<float> pr(0.0f, 1.0f);
+            // spark spawn rate (per second)
+            const float sparkRate = 0.8f; // average ~0.8 sparks/sec
+            // shooting star spawn rate (per second)
+            const float shootRate = 0.035f; // rare (~1 every 28s)
+            float pSpark = sparkRate * dt;
+            float pShoot = shootRate * dt;
+            if (pr(runtimeRng) < pSpark) {
+                std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
+                std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
+                Spark s; s.pos = { rx(runtimeRng), ry(runtimeRng) };
+                s.maxLife = 0.15f + (pr(runtimeRng) * 0.12f);
+                s.size = 2.0f + static_cast<int>(pr(runtimeRng) * 3.0f);
+                s.life = 0.0f;
+                sparks.push_back(s);
+            }
+            if (pr(runtimeRng) < pShoot) {
+                // choose spawn edge and velocity across screen diagonally
+                std::uniform_real_distribution<float> between(0.0f, 1.0f);
+                float side = between(runtimeRng);
+                ShootingStar ss;
+                if (side < 0.5f) {
+                    // spawn left or top
+                    if (between(runtimeRng) < 0.6f) {
+                        ss.pos = { -20.0f, between(runtimeRng) * H * 0.6f };
+                        ss.vel = { 500.0f + between(runtimeRng) * 220.0f, 120.0f + between(runtimeRng) * 160.0f };
+                    } else {
+                        ss.pos = { between(runtimeRng) * W * 0.6f, -20.0f };
+                        ss.vel = { 180.0f + between(runtimeRng) * 240.0f, 420.0f + between(runtimeRng) * 200.0f };
+                    }
+                } else {
+                    // spawn right/top -> move left-down
+                    ss.pos = { static_cast<float>(W) + 20.0f, between(runtimeRng) * H * 0.6f };
+                    ss.vel = { -420.0f - between(runtimeRng) * 300.0f, 160.0f + between(runtimeRng) * 200.0f };
+                }
+                ss.life = 0.0f;
+                ss.maxLife = 0.9f + between(runtimeRng) * 0.8f;
+                ss.length = 30.0f + between(runtimeRng) * 60.0f;
+                shootingStars.push_back(ss);
+            }
+        }
+
         // Update and draw asteroids
         // Draw background stars with simple parallax layers
         if (!stars.empty()) {
@@ -453,6 +518,56 @@ int main(int argc, char** argv) {
                 }
             }
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        }
+
+        // Update and draw sparks (small pops)
+        if (!sparks.empty()) {
+            for (int i = static_cast<int>(sparks.size()) - 1; i >= 0; --i) {
+                Spark &s = sparks[i];
+                s.life += dt;
+                float t = s.life / s.maxLife;
+                if (t >= 1.0f) { sparks.erase(sparks.begin() + i); continue; }
+                float alpha = static_cast<float>(1.0f - t);
+                int a = static_cast<int>(200.0f * alpha) + 55;
+                SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(ren, 255, 220, 100, std::max(0, std::min(255, a)));
+                int sz = static_cast<int>(s.size + (1.0f - t) * 2.0f);
+                SDL_Rect r{ static_cast<int>(s.pos.x) - sz/2, static_cast<int>(s.pos.y) - sz/2, sz, sz };
+                SDL_RenderFillRect(ren, &r);
+                SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+            }
+        }
+
+        // Update and draw shooting stars
+        if (!shootingStars.empty()) {
+            for (int i = static_cast<int>(shootingStars.size()) - 1; i >= 0; --i) {
+                ShootingStar &ss = shootingStars[i];
+                ss.life += dt;
+                if (ss.life >= ss.maxLife) { shootingStars.erase(shootingStars.begin() + i); continue; }
+                // advance
+                ss.pos.x += ss.vel.x * dt;
+                ss.pos.y += ss.vel.y * dt;
+                float lifeFrac = 1.0f - ss.life / ss.maxLife; // 1..0
+
+                // draw trail: multiple segments backwards along velocity
+                SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+                for (int s = 0; s < 6; ++s) {
+                    float segT = static_cast<float>(s) / 6.0f;
+                    float px = ss.pos.x - ss.vel.x * (segT * ss.length) / std::max(1.0f, std::sqrt(ss.vel.x*ss.vel.x + ss.vel.y*ss.vel.y));
+                    float py = ss.pos.y - ss.vel.y * (segT * ss.length) / std::max(1.0f, std::sqrt(ss.vel.x*ss.vel.x + ss.vel.y*ss.vel.y));
+                    int a = static_cast<int>(220.0f * lifeFrac * (1.0f - segT));
+                    int col = 255 - static_cast<int>(80.0f * segT);
+                    SDL_SetRenderDrawColor(ren, col, col, 220, std::max(0, std::min(255, a)));
+                    SDL_Rect rr{ static_cast<int>(px) - 2, static_cast<int>(py) - 1, 4, 2 };
+                    SDL_RenderFillRect(ren, &rr);
+                }
+                // head bright
+                int headAlpha = static_cast<int>(255.0f * lifeFrac);
+                SDL_SetRenderDrawColor(ren, 255, 240, 200, std::max(0, std::min(255, headAlpha)));
+                SDL_Rect head{ static_cast<int>(ss.pos.x) - 2, static_cast<int>(ss.pos.y) - 2, 4, 4 };
+                SDL_RenderFillRect(ren, &head);
+                SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+            }
         }
 
         // small debug indicator (top-right): preset dots + debug square
