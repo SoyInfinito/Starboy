@@ -183,6 +183,7 @@ int main(int argc, char** argv) {
     float boostTimer = 0.0f; // seconds left for thrust boost
     float shieldTimer = 0.0f; // seconds left for shield (invulnerable)
     float gunTimer = 0.0f; // seconds left for gun enabled
+    int gunLevel = 0; // number of parallel bullets when shooting (increases with pickups)
     const float pickupRadius = 10.0f;
 
     auto createAsteroids = [&](std::vector<Asteroid>& out) {
@@ -469,18 +470,19 @@ int main(int argc, char** argv) {
         static bool spacePrev = false;
         bool spaceNow = k[SDL_SCANCODE_SPACE];
         if (spaceNow && !spacePrev && gunTimer > 0.0f) {
-            // spawn a bullet at ship nose
-            Bullet b;
-            float noseX = shipPos.x + std::sin(shipAngle) * (-14.0f * 1.6f);
-            float noseY = shipPos.y - std::cos(shipAngle) * (-14.0f * 1.6f);
-            // Note: nose above uses local coords where nose is (0,-sr*1.6f)
-            b.pos = { shipPos.x + std::sin(shipAngle) *  - (14.0f * 1.6f), shipPos.y + -std::cos(shipAngle) *  - (14.0f * 1.6f) };
-            // simpler: use forward vector
+            // spawn one or more bullets depending on gunLevel
             float bv = 520.0f;
-            b.pos = { shipPos.x + std::sin(shipAngle) * 20.0f, shipPos.y - std::cos(shipAngle) * 20.0f };
-            b.vel = { std::sin(shipAngle) * bv + shipVel.x, -std::cos(shipAngle) * bv + shipVel.y };
-            b.life = 0.0f; b.maxLife = 2.5f;
-            bullets.push_back(b);
+            int level = std::max(1, gunLevel);
+            float spread = 0.18f; // radians between bullets
+            float center = (level - 1) * 0.5f;
+            for (int bi = 0; bi < level; ++bi) {
+                float ang = shipAngle + (bi - center) * spread;
+                Bullet b;
+                b.pos = { shipPos.x + std::sin(ang) * 20.0f, shipPos.y - std::cos(ang) * 20.0f };
+                b.vel = { std::sin(ang) * bv + shipVel.x, -std::cos(ang) * bv + shipVel.y };
+                b.life = 0.0f; b.maxLife = 2.5f;
+                bullets.push_back(b);
+            }
         }
         spacePrev = spaceNow;
 
@@ -543,7 +545,15 @@ int main(int argc, char** argv) {
                 } else if (p.type == PickupType::Shield) {
                     shieldTimer = 6.0f; // 6s shield
                 } else if (p.type == PickupType::Gun) {
-                    gunTimer = 20.0f; // 20s gun enabled
+                    // If gun already active, increase level (more parallel bullets).
+                    if (gunTimer <= 0.0f) {
+                        gunTimer = 20.0f; // 20s gun enabled
+                        gunLevel = 1;
+                    } else {
+                        // extend duration and add another parallel bullet (cap at 4)
+                        gunTimer += 8.0f;
+                        if (gunLevel < 4) ++gunLevel;
+                    }
                 }
                 // create small spark on collection
                 Spark s; s.pos = p.pos; s.life = 0.0f; s.maxLife = 0.18f; s.size = 3.0f; sparks.push_back(s);
@@ -922,10 +932,10 @@ int main(int argc, char** argv) {
             int ringR = static_cast<int>(shipRadius * 1.9f * (1.0f + 0.06f * std::sin(t * 10.0f)));
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
             // outer glow (more translucent)
-            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(90 * pulse));
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(60 * pulse));
             drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + 6);
             // core ring
-            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(120 * pulse));
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(80 * pulse));
             for (int o = -2; o <= 2; ++o) drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + o);
             // rotating sparkles
             for (int s = 0; s < 6; ++s) {
@@ -934,7 +944,7 @@ int main(int argc, char** argv) {
                 int px = static_cast<int>(shipPos.x + std::cos(ang) * rr);
                 int py = static_cast<int>(shipPos.y + std::sin(ang) * rr);
                 // lower sparkle alpha so the whole shield is more translucent
-                SDL_SetRenderDrawColor(ren, 255, 255, 240, static_cast<int>(100 * (0.6f + 0.4f * std::sin(t * 8.0f + s)))) ;
+                SDL_SetRenderDrawColor(ren, 255, 255, 240, static_cast<int>(70 * (0.6f + 0.4f * std::sin(t * 8.0f + s)))) ;
                 SDL_Rect pr{ px-2, py-2, 4, 4 };
                 SDL_RenderFillRect(ren, &pr);
             }
