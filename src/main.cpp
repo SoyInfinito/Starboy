@@ -597,7 +597,7 @@ int main(int argc, char** argv) {
             if (pr(runtimeRng) < pickupRate * dt) {
                 std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
                 std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
-                std::uniform_real_distribution<int> pickType(0,2);
+                std::uniform_int_distribution<int> pickType(0,2);
                 Pickup p; p.pos = { rx(runtimeRng), ry(runtimeRng) };
                 int t = pickType(runtimeRng);
                 p.type = (t==0) ? PickupType::Booster : (t==1) ? PickupType::Shield : PickupType::Gun;
