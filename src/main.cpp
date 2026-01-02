@@ -494,32 +494,35 @@ int main(int argc, char** argv) {
         shipPos.y = wrap(shipPos.y, 0.0f, static_cast<float>(H));
 
         // Simple collision detection: ship vs asteroid (circle-circle approx)
-        for (int i = static_cast<int>(asts.size()) - 1; i >= 0; --i) {
-            const Asteroid a = asts[i];
-            float dx = shipPos.x - a.pos.x;
-            float dy = shipPos.y - a.pos.y;
-            float dist2 = dx*dx + dy*dy;
-            float r = shipRadius + a.radius;
-            if (dist2 <= r * r) {
-                // Collision occurred: split asteroid if large enough, otherwise remove
-                std::vector<Asteroid> children;
-                splitAsteroid(a, children);
-                // erase the original
-                asts.erase(asts.begin() + i);
-                // if children produced, set small velocities for them
-                for (size_t ci = 0; ci < children.size(); ++ci) {
-                    // velocity roughly perpendicular to offset direction
-                    float vx = (ci == 0) ? -40.0f : 40.0f;
-                    float vy = (ci == 0) ? -24.0f : 24.0f;
-                    children[ci].vel.x = vx;
-                    children[ci].vel.y = vy;
-                    asts.push_back(std::move(children[ci]));
+        // If shield is active, skip collisions.
+        if (shieldTimer <= 0.0f) {
+            for (int i = static_cast<int>(asts.size()) - 1; i >= 0; --i) {
+                const Asteroid a = asts[i];
+                float dx = shipPos.x - a.pos.x;
+                float dy = shipPos.y - a.pos.y;
+                float dist2 = dx*dx + dy*dy;
+                float r = shipRadius + a.radius;
+                if (dist2 <= r * r) {
+                    // Collision occurred: split asteroid if large enough, otherwise remove
+                    std::vector<Asteroid> children;
+                    splitAsteroid(a, children);
+                    // erase the original
+                    asts.erase(asts.begin() + i);
+                    // if children produced, set small velocities for them
+                    for (size_t ci = 0; ci < children.size(); ++ci) {
+                        // velocity roughly perpendicular to offset direction
+                        float vx = (ci == 0) ? -40.0f : 40.0f;
+                        float vy = (ci == 0) ? -24.0f : 24.0f;
+                        children[ci].vel.x = vx;
+                        children[ci].vel.y = vy;
+                        asts.push_back(std::move(children[ci]));
+                    }
+                    // reset ship
+                    shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
+                    shipVel = { 0.0f, 0.0f };
+                    collisionFlash = 0.6f;
+                    break; // handle one collision per frame
                 }
-                // reset ship
-                shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
-                shipVel = { 0.0f, 0.0f };
-                collisionFlash = 0.6f;
-                break; // handle one collision per frame
             }
         }
 
@@ -911,6 +914,31 @@ int main(int argc, char** argv) {
         }
 
         drawPolygon(ren, shipPts);
+
+        // Shield visual effect when active
+        if (shieldTimer > 0.0f) {
+            float t = SDL_GetTicks() * 0.001f;
+            float pulse = 0.7f + 0.3f * std::sin(t * 6.0f);
+            int ringR = static_cast<int>(shipRadius * 1.9f * (1.0f + 0.06f * std::sin(t * 10.0f)));
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            // outer glow
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(140 * pulse));
+            drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + 6);
+            // core ring
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(200 * pulse));
+            for (int o = -2; o <= 2; ++o) drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + o);
+            // rotating sparkles
+            for (int s = 0; s < 6; ++s) {
+                float ang = t * 3.0f + s * (6.2831853f / 6.0f);
+                float rr = static_cast<float>(ringR) - 6.0f;
+                int px = static_cast<int>(shipPos.x + std::cos(ang) * rr);
+                int py = static_cast<int>(shipPos.y + std::sin(ang) * rr);
+                SDL_SetRenderDrawColor(ren, 255, 255, 240, static_cast<int>(160 * (0.6f + 0.4f * std::sin(t * 8.0f + s)))) ;
+                SDL_Rect pr{ px-2, py-2, 4, 4 };
+                SDL_RenderFillRect(ren, &pr);
+            }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        }
 
         // If menu is open, render overlay and menu items on top
         if (menuOpen) {
