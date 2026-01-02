@@ -69,6 +69,18 @@ static void drawFilledTriangle(SDL_Renderer* r, Vec2 p0, Vec2 p1, Vec2 p2) {
     }
 }
 
+// Small filled circle rasterizer for pickup icons and effects
+static void drawFilledCircle(SDL_Renderer* r, int cx, int cy, int radius) {
+    if (radius <= 0) return;
+    for (int dy = -radius; dy <= radius; ++dy) {
+        int yy = cy + dy;
+        int dx = static_cast<int>(std::floor(std::sqrt((double)radius*radius - dy*dy)));
+        int x0 = cx - dx;
+        int x1 = cx + dx;
+        SDL_RenderDrawLine(r, x0, yy, x1, yy);
+    }
+}
+
 struct Asteroid {
     Vec2 pos;
     std::vector<Vec2> shape; // relative
@@ -593,7 +605,7 @@ int main(int argc, char** argv) {
             }
 
             // Spawn pickups occasionally
-            const float pickupRate = 0.06f; // ~0.06 per second (~1 every ~16s)
+            const float pickupRate = 0.12f; // ~0.12 per second (~1 every ~8s) - raised for visibility
             if (pr(runtimeRng) < pickupRate * dt) {
                 std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
                 std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
@@ -739,6 +751,41 @@ int main(int argc, char** argv) {
                 absPts.push_back({p.x + a.pos.x, p.y + a.pos.y});
             }
             drawPolygon(ren, absPts);
+        }
+
+        // Draw pickups: pulsing colored circles with optional label when TTF available
+        if (!pickups.empty()) {
+            float tt = SDL_GetTicks() * 0.001f;
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            for (size_t pi = 0; pi < pickups.size(); ++pi) {
+                const Pickup &p = pickups[pi];
+                float pulse = 1.0f + 0.25f * std::sin(tt * 3.5f + (float)pi);
+                int r = static_cast<int>(pickupRadius * 1.1f * pulse);
+                Uint8 cr=200, cg=200, cb=200;
+                const char *label = "";
+                if (p.type == PickupType::Booster) { cr = 80; cg = 160; cb = 255; label = "B"; }
+                else if (p.type == PickupType::Shield) { cr = 80; cg = 220; cb = 120; label = "S"; }
+                else if (p.type == PickupType::Gun) { cr = 255; cg = 160; cb = 60; label = "G"; }
+                // outer glow
+                SDL_SetRenderDrawColor(ren, cr/3, cg/3, cb/3, 160);
+                drawFilledCircle(ren, static_cast<int>(p.pos.x), static_cast<int>(p.pos.y), r+4);
+                // core
+                SDL_SetRenderDrawColor(ren, cr, cg, cb, 220);
+                drawFilledCircle(ren, static_cast<int>(p.pos.x), static_cast<int>(p.pos.y), r);
+                // outline
+                SDL_SetRenderDrawColor(ren, 0,0,0,120);
+                for (int o = 0; o < 2; ++o) drawFilledCircle(ren, static_cast<int>(p.pos.x), static_cast<int>(p.pos.y), r - o);
+
+                // optional small text label if font available
+                int tw=0, th=0;
+                SDL_Texture* txt = renderText(ren, font, label, SDL_Color{32,32,32,255}, tw, th);
+                if (txt) {
+                    SDL_Rect dst{ static_cast<int>(p.pos.x) - tw/2, static_cast<int>(p.pos.y) - th/2, tw, th };
+                    SDL_RenderCopy(ren, txt, NULL, &dst);
+                    SDL_DestroyTexture(txt);
+                }
+            }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
         }
 
         // Update bullets: move, draw and test collisions with asteroids
