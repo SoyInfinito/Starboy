@@ -921,11 +921,11 @@ int main(int argc, char** argv) {
             float pulse = 0.7f + 0.3f * std::sin(t * 6.0f);
             int ringR = static_cast<int>(shipRadius * 1.9f * (1.0f + 0.06f * std::sin(t * 10.0f)));
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-            // outer glow
-            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(140 * pulse));
+            // outer glow (more translucent)
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(90 * pulse));
             drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + 6);
             // core ring
-            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(200 * pulse));
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(120 * pulse));
             for (int o = -2; o <= 2; ++o) drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + o);
             // rotating sparkles
             for (int s = 0; s < 6; ++s) {
@@ -933,7 +933,8 @@ int main(int argc, char** argv) {
                 float rr = static_cast<float>(ringR) - 6.0f;
                 int px = static_cast<int>(shipPos.x + std::cos(ang) * rr);
                 int py = static_cast<int>(shipPos.y + std::sin(ang) * rr);
-                SDL_SetRenderDrawColor(ren, 255, 255, 240, static_cast<int>(160 * (0.6f + 0.4f * std::sin(t * 8.0f + s)))) ;
+                // lower sparkle alpha so the whole shield is more translucent
+                SDL_SetRenderDrawColor(ren, 255, 255, 240, static_cast<int>(100 * (0.6f + 0.4f * std::sin(t * 8.0f + s)))) ;
                 SDL_Rect pr{ px-2, py-2, 4, 4 };
                 SDL_RenderFillRect(ren, &pr);
             }
