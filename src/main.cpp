@@ -69,6 +69,18 @@ static void drawFilledTriangle(SDL_Renderer* r, Vec2 p0, Vec2 p1, Vec2 p2) {
     }
 }
 
+// Small filled circle rasterizer for pickup icons and effects
+static void drawFilledCircle(SDL_Renderer* r, int cx, int cy, int radius) {
+    if (radius <= 0) return;
+    for (int dy = -radius; dy <= radius; ++dy) {
+        int yy = cy + dy;
+        int dx = static_cast<int>(std::floor(std::sqrt((double)radius*radius - dy*dy)));
+        int x0 = cx - dx;
+        int x1 = cx + dx;
+        SDL_RenderDrawLine(r, x0, yy, x1, yy);
+    }
+}
+
 struct Asteroid {
     Vec2 pos;
     std::vector<Vec2> shape; // relative
@@ -90,6 +102,31 @@ struct ShootingStar {
     float life = 0.0f;
     float maxLife = 1.2f;
     float length = 40.0f; // trail length
+};
+
+// Pickups and bullets
+enum class PickupType { Booster, Shield, Gun };
+struct Pickup {
+    Vec2 pos;
+    PickupType type;
+    float life = 0.0f;
+    float maxLife = 30.0f; // despawn after 30s
+};
+
+struct Bullet {
+    Vec2 pos;
+    Vec2 vel;
+    float life = 0.0f;
+    float maxLife = 2.5f;
+};
+
+struct Missile {
+    Vec2 pos;
+    Vec2 vel;
+    float life = 0.0f;
+    float maxLife = 6.0f;
+    float speed = 320.0f;
+    int targetIndex = -1; // index into asts at spawn time; may be invalid later
 };
 
 int main(int argc, char** argv) {
@@ -145,8 +182,24 @@ int main(int argc, char** argv) {
     // runtime visual events
     std::vector<Spark> sparks;
     std::vector<ShootingStar> shootingStars;
+    // pickups, bullets and missiles
+    std::vector<Pickup> pickups;
+    std::vector<Bullet> bullets;
+    std::vector<Missile> missiles;
     // RNG for runtime events (non-deterministic)
     std::mt19937 runtimeRng(static_cast<unsigned>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+
+    // Ship pickup/effect timers
+    float boostTimer = 0.0f; // seconds left for thrust boost
+    float shieldTimer = 0.0f; // seconds left for shield (invulnerable)
+    float gunTimer = 0.0f; // seconds left for gun enabled
+    int gunLevel = 0; // number of parallel bullets when shooting (increases with pickups)
+    // auto-fire and missile timers
+    float autoFireTimer = 0.0f; // cooldown for automatic bullets
+    const float autoFireCooldown = 0.12f;
+    float missileFireTimer = 0.0f;
+    const float missileFireCooldown = 0.6f;
+    const float pickupRadius = 10.0f;
 
     auto createAsteroids = [&](std::vector<Asteroid>& out) {
         out.clear();
@@ -417,14 +470,93 @@ int main(int argc, char** argv) {
         const Uint8* k = SDL_GetKeyboardState(NULL);
         if (k[SDL_SCANCODE_LEFT]) shipAngle -= 3.0f * dt;
         if (k[SDL_SCANCODE_RIGHT]) shipAngle += 3.0f * dt;
+        // thrust value modified by booster pickup
         if (k[SDL_SCANCODE_UP]) {
-            float thrust = 200.0f * dt;
+            float thrustMul = (boostTimer > 0.0f) ? 1.8f : 1.0f; // booster increases thrust
+            float thrust = 200.0f * thrustMul * dt;
             // forward vector for local (0,-1) after rotation by shipAngle:
             float fx = std::sin(shipAngle);
             float fy = -std::cos(shipAngle);
             shipVel.x += fx * thrust;
             shipVel.y += fy * thrust;
         }
+
+        // Shooting (space) when gun is active
+        static bool spacePrev = false;
+        bool spaceNow = k[SDL_SCANCODE_SPACE];
+        // Shooting behavior depends on gunLevel
+        if (gunTimer > 0.0f) {
+            // Level 1-4: single-press fires parallel bullets
+            if (gunLevel <= 4) {
+                if (spaceNow && !spacePrev) {
+                    float bv = 520.0f;
+                    int level = std::max(1, gunLevel);
+                    float spread = 0.18f; // radians between bullets
+                    float center = (level - 1) * 0.5f;
+                    for (int bi = 0; bi < level; ++bi) {
+                        float ang = shipAngle + (bi - center) * spread;
+                        Bullet b;
+                        b.pos = { shipPos.x + std::sin(ang) * 20.0f, shipPos.y - std::cos(ang) * 20.0f };
+                        b.vel = { std::sin(ang) * bv + shipVel.x, -std::cos(ang) * bv + shipVel.y };
+                        b.life = 0.0f; b.maxLife = 2.5f;
+                        bullets.push_back(b);
+                    }
+                }
+            }
+            // Level 5: automatic bullets while holding space
+            else if (gunLevel == 5) {
+                if (spaceNow) {
+                    autoFireTimer -= dt;
+                    if (autoFireTimer <= 0.0f) {
+                        autoFireTimer = autoFireCooldown;
+                        // fire a single bullet (or small spread)
+                        float bv = 520.0f;
+                        Bullet b;
+                        b.pos = { shipPos.x + std::sin(shipAngle) * 20.0f, shipPos.y - std::cos(shipAngle) * 20.0f };
+                        b.vel = { std::sin(shipAngle) * bv + shipVel.x, -std::cos(shipAngle) * bv + shipVel.y };
+                        b.life = 0.0f; b.maxLife = 2.5f;
+                        bullets.push_back(b);
+                    }
+                } else {
+                    // reset timer so immediate fire when pressed again
+                    autoFireTimer = 0.0f;
+                }
+            }
+            // Level 6+: spawn seeking missiles while holding space
+            else /* gunLevel >= 6 */ {
+                if (spaceNow) {
+                    missileFireTimer -= dt;
+                    if (missileFireTimer <= 0.0f) {
+                        missileFireTimer = missileFireCooldown;
+                        // spawn a seeking missile
+                        Missile m;
+                        m.pos = { shipPos.x + std::sin(shipAngle) * 18.0f, shipPos.y - std::cos(shipAngle) * 18.0f };
+                        m.life = 0.0f; m.maxLife = 6.0f; m.speed = 360.0f;
+                        // pick nearest asteroid
+                        float bestDist = 1e9f; int bestIdx = -1;
+                        for (int ai = 0; ai < (int)asts.size(); ++ai) {
+                            float dx = asts[ai].pos.x - m.pos.x; float dy = asts[ai].pos.y - m.pos.y;
+                            float d2 = dx*dx + dy*dy;
+                            if (d2 < bestDist) { bestDist = d2; bestIdx = ai; }
+                        }
+                        if (bestIdx >= 0) {
+                            m.targetIndex = bestIdx;
+                            // initial velocity towards target
+                            Vec2 tp = asts[bestIdx].pos;
+                            float ang = std::atan2(tp.y - m.pos.y, tp.x - m.pos.x);
+                            m.vel = { std::cos(ang) * m.speed, std::sin(ang) * m.speed };
+                        } else {
+                            // no target: shoot forward
+                            m.vel = { std::sin(shipAngle) * m.speed, -std::cos(shipAngle) * m.speed };
+                        }
+                        missiles.push_back(m);
+                    }
+                } else {
+                    missileFireTimer = 0.0f;
+                }
+            }
+        }
+        spacePrev = spaceNow;
 
         // Drag
         shipVel.x *= 0.995f;
@@ -436,34 +568,79 @@ int main(int argc, char** argv) {
         shipPos.y = wrap(shipPos.y, 0.0f, static_cast<float>(H));
 
         // Simple collision detection: ship vs asteroid (circle-circle approx)
-        for (int i = static_cast<int>(asts.size()) - 1; i >= 0; --i) {
-            const Asteroid a = asts[i];
-            float dx = shipPos.x - a.pos.x;
-            float dy = shipPos.y - a.pos.y;
-            float dist2 = dx*dx + dy*dy;
-            float r = shipRadius + a.radius;
-            if (dist2 <= r * r) {
-                // Collision occurred: split asteroid if large enough, otherwise remove
-                std::vector<Asteroid> children;
-                splitAsteroid(a, children);
-                // erase the original
-                asts.erase(asts.begin() + i);
-                // if children produced, set small velocities for them
-                for (size_t ci = 0; ci < children.size(); ++ci) {
-                    // velocity roughly perpendicular to offset direction
-                    float vx = (ci == 0) ? -40.0f : 40.0f;
-                    float vy = (ci == 0) ? -24.0f : 24.0f;
-                    children[ci].vel.x = vx;
-                    children[ci].vel.y = vy;
-                    asts.push_back(std::move(children[ci]));
+        // If shield is active, skip collisions.
+        if (shieldTimer <= 0.0f) {
+            for (int i = static_cast<int>(asts.size()) - 1; i >= 0; --i) {
+                const Asteroid a = asts[i];
+                float dx = shipPos.x - a.pos.x;
+                float dy = shipPos.y - a.pos.y;
+                float dist2 = dx*dx + dy*dy;
+                float r = shipRadius + a.radius;
+                if (dist2 <= r * r) {
+                    // Collision occurred: split asteroid if large enough, otherwise remove
+                    std::vector<Asteroid> children;
+                    splitAsteroid(a, children);
+                    // erase the original
+                    asts.erase(asts.begin() + i);
+                    // if children produced, set small velocities for them
+                    for (size_t ci = 0; ci < children.size(); ++ci) {
+                        // velocity roughly perpendicular to offset direction
+                        float vx = (ci == 0) ? -40.0f : 40.0f;
+                        float vy = (ci == 0) ? -24.0f : 24.0f;
+                        children[ci].vel.x = vx;
+                        children[ci].vel.y = vy;
+                        asts.push_back(std::move(children[ci]));
+                    }
+                    // reset ship
+                    shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
+                    shipVel = { 0.0f, 0.0f };
+                    collisionFlash = 0.6f;
+                    break; // handle one collision per frame
                 }
-                // reset ship
-                shipPos = { static_cast<float>(W) / 2.0f, static_cast<float>(H) / 2.0f };
-                shipVel = { 0.0f, 0.0f };
-                collisionFlash = 0.6f;
-                break; // handle one collision per frame
             }
         }
+
+        // Apply shield invulnerability effect: if shield active, skip collision handling above
+        // (the collision loop above has already executed; to make shield immediate we check pickups before asteroid collision in future iterations)
+
+        // Handle pickup collection: ship vs pickup
+        for (int i = static_cast<int>(pickups.size()) - 1; i >= 0; --i) {
+            Pickup &p = pickups[i];
+            float dx = shipPos.x - p.pos.x;
+            float dy = shipPos.y - p.pos.y;
+            float d2 = dx*dx + dy*dy;
+            float r = shipRadius + pickupRadius;
+            if (d2 <= r*r) {
+                // collect
+                if (p.type == PickupType::Booster) {
+                    boostTimer = 6.0f; // 6s boost
+                } else if (p.type == PickupType::Shield) {
+                    shieldTimer = 6.0f; // 6s shield
+                } else if (p.type == PickupType::Gun) {
+                    // If gun already active, increase level (more parallel bullets).
+                    if (gunTimer <= 0.0f) {
+                        gunTimer = 20.0f; // 20s gun enabled
+                        gunLevel = 1;
+                    } else {
+                        // extend duration and add another parallel bullet (cap at 4)
+                        gunTimer += 8.0f;
+                        if (gunLevel < 4) ++gunLevel;
+                    }
+                }
+                // create small spark on collection
+                Spark s; s.pos = p.pos; s.life = 0.0f; s.maxLife = 0.18f; s.size = 3.0f; sparks.push_back(s);
+                pickups.erase(pickups.begin() + i);
+            } else {
+                // age and despawn
+                p.life += dt;
+                if (p.life >= p.maxLife) pickups.erase(pickups.begin() + i);
+            }
+        }
+
+        // Update ship effect timers
+        if (boostTimer > 0.0f) boostTimer -= dt;
+        if (shieldTimer > 0.0f) shieldTimer -= dt;
+        if (gunTimer > 0.0f) gunTimer -= dt;
 
         // Render
         SDL_SetRenderDrawColor(ren, 8, 8, 20, 255);
@@ -510,6 +687,20 @@ int main(int argc, char** argv) {
                 ss.maxLife = 0.9f + between(runtimeRng) * 0.8f;
                 ss.length = 30.0f + between(runtimeRng) * 60.0f;
                 shootingStars.push_back(ss);
+            }
+
+            // Spawn pickups occasionally
+            const float pickupRate = 0.12f; // ~0.12 per second (~1 every ~8s) - raised for visibility
+            if (pr(runtimeRng) < pickupRate * dt) {
+                std::uniform_real_distribution<float> rx(0.0f, static_cast<float>(W));
+                std::uniform_real_distribution<float> ry(0.0f, static_cast<float>(H));
+                std::uniform_int_distribution<int> pickType(0,2);
+                Pickup p; p.pos = { rx(runtimeRng), ry(runtimeRng) };
+                int t = pickType(runtimeRng);
+                p.type = (t==0) ? PickupType::Booster : (t==1) ? PickupType::Shield : PickupType::Gun;
+                p.maxLife = 22.0f + pr(runtimeRng) * 18.0f; // 22..40s
+                p.life = 0.0f;
+                pickups.push_back(p);
             }
         }
 
@@ -647,6 +838,143 @@ int main(int argc, char** argv) {
             drawPolygon(ren, absPts);
         }
 
+        // Draw pickups: pulsing colored circles with optional label when TTF available
+        if (!pickups.empty()) {
+            float tt = SDL_GetTicks() * 0.001f;
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            for (size_t pi = 0; pi < pickups.size(); ++pi) {
+                const Pickup &p = pickups[pi];
+                float pulse = 1.0f + 0.25f * std::sin(tt * 3.5f + (float)pi);
+                int r = static_cast<int>(pickupRadius * 1.1f * pulse);
+                Uint8 cr=200, cg=200, cb=200;
+                const char *label = "";
+                if (p.type == PickupType::Booster) { cr = 80; cg = 160; cb = 255; label = "B"; }
+                else if (p.type == PickupType::Shield) { cr = 80; cg = 220; cb = 120; label = "S"; }
+                else if (p.type == PickupType::Gun) { cr = 255; cg = 160; cb = 60; label = "G"; }
+                // outer glow
+                SDL_SetRenderDrawColor(ren, cr/3, cg/3, cb/3, 160);
+                drawFilledCircle(ren, static_cast<int>(p.pos.x), static_cast<int>(p.pos.y), r+4);
+                // core
+                SDL_SetRenderDrawColor(ren, cr, cg, cb, 220);
+                drawFilledCircle(ren, static_cast<int>(p.pos.x), static_cast<int>(p.pos.y), r);
+                // outline
+                SDL_SetRenderDrawColor(ren, 0,0,0,120);
+                for (int o = 0; o < 2; ++o) drawFilledCircle(ren, static_cast<int>(p.pos.x), static_cast<int>(p.pos.y), r - o);
+
+                // optional small text label if font available
+                int tw=0, th=0;
+                SDL_Texture* txt = renderText(ren, font, label, SDL_Color{32,32,32,255}, tw, th);
+                if (txt) {
+                    SDL_Rect dst{ static_cast<int>(p.pos.x) - tw/2, static_cast<int>(p.pos.y) - th/2, tw, th };
+                    SDL_RenderCopy(ren, txt, NULL, &dst);
+                    SDL_DestroyTexture(txt);
+                }
+            }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        }
+
+        // Update bullets: move, draw and test collisions with asteroids
+        if (!bullets.empty()) {
+            for (int bi = static_cast<int>(bullets.size()) - 1; bi >= 0; --bi) {
+                Bullet &b = bullets[bi];
+                b.life += dt;
+                if (b.life >= b.maxLife) { bullets.erase(bullets.begin() + bi); continue; }
+                b.pos.x += b.vel.x * dt;
+                b.pos.y += b.vel.y * dt;
+                // wrap
+                b.pos.x = wrap(b.pos.x, 0.0f, static_cast<float>(W));
+                b.pos.y = wrap(b.pos.y, 0.0f, static_cast<float>(H));
+                // draw bullet
+                SDL_SetRenderDrawColor(ren, 255, 240, 100, 255);
+                SDL_Rect br{ static_cast<int>(b.pos.x) - 2, static_cast<int>(b.pos.y) - 2, 4, 4 };
+                SDL_RenderFillRect(ren, &br);
+
+                // collision with asteroids
+                for (int ai = static_cast<int>(asts.size()) - 1; ai >= 0; --ai) {
+                    Asteroid a = asts[ai];
+                    float dx = b.pos.x - a.pos.x;
+                    float dy = b.pos.y - a.pos.y;
+                    float d2 = dx*dx + dy*dy;
+                    if (d2 <= a.radius * a.radius) {
+                        // hit: split or remove
+                        std::vector<Asteroid> children;
+                        splitAsteroid(a, children);
+                        asts.erase(asts.begin() + ai);
+                        for (size_t ci = 0; ci < children.size(); ++ci) {
+                            children[ci].vel.x = (ci == 0) ? -40.0f : 40.0f;
+                            children[ci].vel.y = (ci == 0) ? -24.0f : 24.0f;
+                            asts.push_back(std::move(children[ci]));
+                        }
+                        // create spark
+                        Spark s; s.pos = b.pos; s.life = 0.0f; s.maxLife = 0.16f; s.size = 3.0f; sparks.push_back(s);
+                        bullets.erase(bullets.begin() + bi);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Update missiles: steering toward target and collisions
+        if (!missiles.empty()) {
+            for (int mi = static_cast<int>(missiles.size()) - 1; mi >= 0; --mi) {
+                Missile &m = missiles[mi];
+                m.life += dt;
+                if (m.life >= m.maxLife) { missiles.erase(missiles.begin() + mi); continue; }
+                // steering
+                Vec2 desiredVel = m.vel;
+                if (m.targetIndex >= 0 && m.targetIndex < (int)asts.size()) {
+                    Vec2 tgt = asts[m.targetIndex].pos;
+                    float dx = tgt.x - m.pos.x; float dy = tgt.y - m.pos.y;
+                    float dist = std::sqrt(dx*dx + dy*dy);
+                    if (dist > 1e-3f) {
+                        desiredVel.x = (dx / dist) * m.speed;
+                        desiredVel.y = (dy / dist) * m.speed;
+                    }
+                }
+                // simple smoothing toward desired velocity
+                float steer = 6.0f * dt;
+                m.vel.x += (desiredVel.x - m.vel.x) * steer;
+                m.vel.y += (desiredVel.y - m.vel.y) * steer;
+                // clamp to speed
+                float vlen = std::sqrt(m.vel.x*m.vel.x + m.vel.y*m.vel.y);
+                if (vlen > 1e-6f) {
+                    m.vel.x = (m.vel.x / vlen) * m.speed;
+                    m.vel.y = (m.vel.y / vlen) * m.speed;
+                }
+                m.pos.x += m.vel.x * dt;
+                m.pos.y += m.vel.y * dt;
+                m.pos.x = wrap(m.pos.x, 0.0f, static_cast<float>(W));
+                m.pos.y = wrap(m.pos.y, 0.0f, static_cast<float>(H));
+
+                // draw missile (small triangle)
+                SDL_SetRenderDrawColor(ren, 255, 120, 60, 255);
+                SDL_Rect mr{ static_cast<int>(m.pos.x) - 3, static_cast<int>(m.pos.y) - 3, 6, 6 };
+                SDL_RenderFillRect(ren, &mr);
+
+                // collide with asteroids
+                for (int ai = static_cast<int>(asts.size()) - 1; ai >= 0; --ai) {
+                    Asteroid a = asts[ai];
+                    float dx = m.pos.x - a.pos.x;
+                    float dy = m.pos.y - a.pos.y;
+                    float d2 = dx*dx + dy*dy;
+                    if (d2 <= a.radius * a.radius) {
+                        std::vector<Asteroid> children;
+                        splitAsteroid(a, children);
+                        asts.erase(asts.begin() + ai);
+                        for (size_t ci = 0; ci < children.size(); ++ci) {
+                            children[ci].vel.x = (ci == 0) ? -40.0f : 40.0f;
+                            children[ci].vel.y = (ci == 0) ? -24.0f : 24.0f;
+                            asts.push_back(std::move(children[ci]));
+                        }
+                        // explosion spark
+                        Spark s; s.pos = m.pos; s.life = 0.0f; s.maxLife = 0.2f; s.size = 4.0f; sparks.push_back(s);
+                        missiles.erase(missiles.begin() + mi);
+                        break;
+                    }
+                }
+            }
+        }
+
         // collision flash overlay (brief)
         if (collisionFlash > 0.0f) {
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
@@ -729,6 +1057,32 @@ int main(int argc, char** argv) {
         }
 
         drawPolygon(ren, shipPts);
+
+        // Shield visual effect when active
+        if (shieldTimer > 0.0f) {
+            float t = SDL_GetTicks() * 0.001f;
+            float pulse = 0.7f + 0.3f * std::sin(t * 6.0f);
+            int ringR = static_cast<int>(shipRadius * 1.9f * (1.0f + 0.06f * std::sin(t * 10.0f)));
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+            // outer glow (more translucent)
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(60 * pulse));
+            drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + 6);
+            // core ring
+            SDL_SetRenderDrawColor(ren, 80, 220, 120, static_cast<int>(80 * pulse));
+            for (int o = -2; o <= 2; ++o) drawFilledCircle(ren, static_cast<int>(shipPos.x), static_cast<int>(shipPos.y), ringR + o);
+            // rotating sparkles
+            for (int s = 0; s < 6; ++s) {
+                float ang = t * 3.0f + s * (6.2831853f / 6.0f);
+                float rr = static_cast<float>(ringR) - 6.0f;
+                int px = static_cast<int>(shipPos.x + std::cos(ang) * rr);
+                int py = static_cast<int>(shipPos.y + std::sin(ang) * rr);
+                // lower sparkle alpha so the whole shield is more translucent
+                SDL_SetRenderDrawColor(ren, 255, 255, 240, static_cast<int>(70 * (0.6f + 0.4f * std::sin(t * 8.0f + s)))) ;
+                SDL_Rect pr{ px-2, py-2, 4, 4 };
+                SDL_RenderFillRect(ren, &pr);
+            }
+            SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+        }
 
         // If menu is open, render overlay and menu items on top
         if (menuOpen) {

@@ -80,4 +80,14 @@ Initial status
 - **Version:** 0.2
 - **Notes:** Builds with CMake/vcpkg. Current prototype includes ship movement, thrust visuals, deterministic parallax starfield with twinkle presets, occasional shooting stars and sparks, in-game menu with settings, and basic asteroid collision handling. See `starboy_settings.txt` for persisted visual settings.
 
+Planned for 0.3
+- Address the next five issues currently in the repository’s "Ready" state:
+	1. Issue #2 — "collision with asteroids": improve collision detection and handling (ship/asteroid interactions).
+	2. Issue #3 — "Level system": add a basic leveling/score progression with simple thresholds and level-up effects.
+	3. Issue #4 — "Add pickups": implement random pickup items (guns, boosters, shields) with simple effects.
+	4. Issue #5 — "collision effects": add visual and gameplay effects when objects are hit (explosion sparks, screen flash, sound hooks).
+	5. Issue #8 — "A start/restart should randomize asteroids": randomize asteroid positions/sizes/shapes on restart.
+
+These items will be developed on a `release/v0.3` branch (created from `main`) and merged back to `main` when ready.
+
 If you'd like, I can push this as a new repository under your GitHub account (username `SoyInfinito`) — tell me the repository name and whether you want SSH (`git@github.com:...`) or HTTPS remote, and I'll push it (assuming your local environment has credentials/keys set up).
